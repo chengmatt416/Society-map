@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>國三社會科會考旗艦沙盤 (終極題庫版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; touch-action: none; background: #f3f4f6; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
+        
+        /* 玻璃擬物風 */
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.8); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15); }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 地圖標記 */
+        .custom-div-icon { background: transparent; border: none; transition: all 0.3s ease; }
+        .marker-pin { width: 32px; height: 32px; border-radius: 50% 50% 50% 0; background: #3b82f6; position: absolute; transform: rotate(-45deg); left: 50%; top: 50%; margin: -16px 0 0 -16px; box-shadow: 2px 2px 8px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }
+        .custom-div-icon:hover .marker-pin { transform: rotate(-45deg) scale(1.15); }
+        .marker-icon { transform: rotate(45deg); color: white; font-size: 14px; }
+        
+        .color-tw { background: #10b981; } .color-cn { background: #ef4444; } .color-world { background: #8b5cf6; } .color-geo { background: #f59e0b; }
+        
+        /* 戰場動畫線條 (螞蟻線) */
+        .war-line { stroke-dasharray: 15, 15; animation: march 1.5s linear infinite; }
+        .war-line-japan { stroke-dasharray: 15, 15; animation: march-reverse 1.5s linear infinite; }
+        @keyframes march { to { stroke-dashoffset: -30; } }
+        @keyframes march-reverse { to { stroke-dashoffset: 30; } }
+
+        /* 面板動畫 */
+        #sidebar { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 1000; }
+        #quiz-modal { transition: opacity 0.3s ease, transform 0.3s ease; z-index: 2000; }
+        
+        @media (max-width: 767px) {
+            #sidebar { bottom: 0; left: 0; width: 100%; height: 75vh; border-radius: 24px 24px 0 0; }
+            .sidebar-hidden { transform: translateY(100%); }
+            .leaflet-control-zoom { bottom: 140px !important; }
+        }
+        @media (min-width: 768px) {
+            #sidebar { top: 88px; bottom: 88px; right: 16px; width: 420px; border-radius: 16px; }
+            .sidebar-hidden { transform: translateX(120%); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 頂部導覽列 -->
+    <header class="absolute top-0 md:top-4 left-0 md:left-4 right-0 md:right-4 z-50 flex flex-col md:flex-row justify-between items-center glass-panel md:rounded-2xl px-4 py-2 shadow-sm gap-2">
+        <div class="flex items-center gap-2 w-full md:w-auto justify-between md:justify-start">
+            <div class="flex items-center gap-2">
+                <div class="bg-blue-600 text-white p-1.5 md:p-2 rounded-lg"><i class="fa-solid fa-earth-americas text-lg md:text-xl"></i></div>
+                <div><h1 class="text-lg md:text-xl font-bold text-gray-900 tracking-wide leading-tight">會考社會 <span class="text-blue-600">旗艦沙盤</span></h1></div>
+            </div>
+            <button onclick="openQuizModal()" class="md:hidden bg-red-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-md animate-pulse"><i class="fa-solid fa-pen-nib"></i> 題庫</button>
+        </div>
+        <div id="era-filters" class="flex gap-2 w-full md:w-auto overflow-x-auto scrollbar-hide pb-1 md:pb-0 touch-pan-x snap-x"></div>
+        <button onclick="openQuizModal()" class="hidden md:block bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md transition transform hover:scale-105"><i class="fa-solid fa-pen-nib mr-1"></i> 素養題庫系統</button>
+    </header>
+
+    <!-- 底部時間軸 -->
+    <div id="timeline-container" class="absolute bottom-6 left-1/2 -translate-x-1/2 glass-panel rounded-full px-2 py-2 flex gap-2 overflow-x-auto max-w-[95vw] md:max-w-3xl scrollbar-hide shadow-lg hidden z-50 transition-opacity duration-300"></div>
+
+    <!-- 地圖容器 -->
+    <div id="map"></div>
+
+    <!-- 側邊欄 (事件詳情) -->
+    <aside id="sidebar" class="absolute flex flex-col sidebar-hidden glass-panel overflow-hidden shadow-2xl">
+        <div class="w-full flex justify-center pt-2 pb-1 md:hidden bg-gradient-to-r from-gray-900 to-gray-800"><div class="w-12 h-1.5 bg-gray-500 rounded-full opacity-50"></div></div>
+        <div class="bg-gradient-to-r from-gray-900 to-gray-800 text-white px-5 pb-5 pt-2 md:pt-5 relative shrink-0">
+            <button onclick="closeSidebar()" class="absolute top-3 md:top-4 right-4 text-gray-400 hover:text-white transition p-2"><i class="fa-solid fa-xmark text-xl"></i></button>
+            <div id="sb-type" class="text-xs font-bold uppercase tracking-wider mb-1 text-blue-400">類別</div>
+            <h2 id="sb-title" class="text-xl md:text-2xl font-bold mb-2 leading-tight pr-6">事件標題</h2>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs md:text-sm text-gray-300">
+                <span id="sb-time"><i class="fa-regular fa-clock mr-1"></i>時間</span>
+                <span id="sb-location"><i class="fa-solid fa-location-dot mr-1"></i>地點</span>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-5 bg-white/50">
+            <!-- 新增的觀看動畫按鈕 -->
+            <button id="btn-watch-anim" onclick="hideSidebarKeepAnim()" class="hidden w-full bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-bold py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2 mb-2">
+            <i class="fa-solid fa-eye text-lg"></i> 收起面板觀看戰場動畫
+            </button>
+            <div id="section-relations" class="hidden"><h3 class="text-xs md:text-sm font-bold text-gray-500 border-b pb-1 mb-2"><i class="fa-solid fa-handshake mr-2"></i>關鍵陣營</h3><p id="sb-relations" class="text-sm font-medium text-blue-800 bg-blue-50/80 p-3 rounded-lg border border-blue-100"></p></div>
+            <div id="section-background" class="hidden"><h3 class="text-xs md:text-sm font-bold text-gray-500 border-b pb-1 mb-2"><i class="fa-solid fa-book-open mr-2"></i>歷史背景</h3><p id="sb-background" class="text-gray-700 leading-relaxed text-sm"></p></div>
+            <div id="section-process" class="hidden"><h3 class="text-xs md:text-sm font-bold text-gray-500 border-b pb-1 mb-2"><i class="fa-solid fa-bolt mr-2"></i>事件過程</h3><p id="sb-process" class="text-gray-700 leading-relaxed text-sm"></p></div>
+            <div id="section-impact" class="hidden"><h3 class="text-xs md:text-sm font-bold text-gray-500 border-b pb-1 mb-2"><i class="fa-solid fa-flag-checkered mr-2"></i>影響與結果</h3><p id="sb-impact" class="text-gray-700 leading-relaxed text-sm"></p></div>
+            <div id="section-exam" class="bg-red-50 p-4 rounded-xl border border-red-200 hidden shadow-sm"><h3 class="text-sm font-bold text-red-600 mb-2 flex items-center"><i class="fa-solid fa-pen-to-square mr-2"></i>會考必考重點</h3><p id="sb-exam" class="text-gray-900 leading-relaxed text-sm font-bold"></p></div>
+        </div>
+    </aside>
+
+    <!-- 題庫系統 Modal -->
+    <div id="quiz-modal" class="fixed inset-0 bg-gray-900/90 backdrop-blur-sm hidden flex-col items-center justify-center p-4 opacity-0 scale-95">
+        <div class="bg-white w-full max-w-3xl h-[90vh] md:h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
+            <!-- Header -->
+            <div class="bg-red-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
+                <h2 class="text-xl font-bold"><i class="fa-solid fa-graduation-cap mr-2"></i>素養題庫與診斷系統</h2>
+                <button onclick="closeQuizModal()" class="text-white hover:text-gray-200"><i class="fa-solid fa-xmark text-2xl"></i></button>
+            </div>
+            
+            <!-- Content Area -->
+            <div id="quiz-content" class="flex-1 overflow-y-auto p-6 bg-gray-50">
+                <!-- 1. 設定畫面 -->
+                <div id="quiz-setup">
+                    <h3 class="text-lg font-bold mb-4 text-gray-800 border-b pb-2">自訂測驗範圍</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-2">選擇科目</label>
+                            <div class="flex gap-4">
+                                <label class="flex items-center gap-2 bg-white p-3 rounded-lg border cursor-pointer hover:bg-blue-50"><input type="radio" name="q-subj" value="history" checked onchange="toggleQuizCats()"> 歷史科</label>
+                                <label class="flex items-center gap-2 bg-white p-3 rounded-lg border cursor-pointer hover:bg-blue-50"><input type="radio" name="q-subj" value="geo" onchange="toggleQuizCats()"> 地理科</label>
+                            </div>
+                        </div>
+                        <div id="quiz-cat-history">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">歷史範圍 (可複選)</label>
+                            <div class="flex flex-wrap gap-3">
+                                <label class="flex items-center gap-2 bg-white p-2 rounded border"><input type="checkbox" class="q-cat-cb" value="taiwan" checked> 台灣史</label>
+                                <label class="flex items-center gap-2 bg-white p-2 rounded border"><input type="checkbox" class="q-cat-cb" value="china" checked> 中國史</label>
+                                <label class="flex items-center gap-2 bg-white p-2 rounded border"><input type="checkbox" class="q-cat-cb" value="world" checked> 世界史</label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-2">題數</label>
+                            <select id="q-count" class="w-full p-3 border rounded-lg bg-white">
+                                <option value="5">5 題 (快速測驗)</option>
+                                <option value="10" selected>10 題 (標準測驗)</option>
+                                <option value="20">20 題 (進階測驗)</option>
+                                <option value="50">50 題 (模擬考)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-8 flex gap-4">
+                        <button onclick="startQuiz()" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow transition">開始測驗</button>
+                        <button onclick="showMistakes()" class="flex-1 bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-xl shadow transition"><i class="fa-solid fa-book-journal-whills mr-2"></i>我的錯題本</button>
+                    </div>
+                </div>
+
+                <!-- 2. 測驗進行中畫面 -->
+                <div id="quiz-playing" class="hidden flex flex-col h-full">
+                    <div class="flex justify-between items-center mb-4 text-sm font-bold text-gray-500">
+                        <span id="q-progress">進度: 1 / 10</span>
+                        <span id="q-tag" class="bg-blue-100 text-blue-800 px-2 py-1 rounded">標籤</span>
+                    </div>
+                    <div id="q-text" class="text-lg font-bold text-gray-900 mb-6 leading-relaxed">題目內容...</div>
+                    <div id="q-options" class="space-y-3 flex-1">
+                        <!-- 選項動態生成 -->
+                    </div>
+                    <div class="mt-6 flex justify-end">
+                        <button id="btn-next-q" onclick="nextQuestion()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hidden">下一題 <i class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </div>
+
+                <!-- 3. 測驗結果與診斷 -->
+                <div id="quiz-result" class="hidden">
+                    <div class="text-center mb-8">
+                        <h2 class="text-3xl font-black text-gray-800 mb-2">測驗完成！</h2>
+                        <p class="text-xl">你的得分：<span id="r-score" class="text-red-600 font-bold text-4xl">100</span> 分</p>
+                    </div>
+                    <div class="bg-blue-50 p-5 rounded-xl border border-blue-100 mb-6">
+                        <h3 class="font-bold text-blue-800 mb-2"><i class="fa-solid fa-stethoscope mr-2"></i>AI 弱點診斷</h3>
+                        <p id="r-diagnosis" class="text-gray-700 text-sm leading-relaxed"></p>
+                    </div>
+                    <h3 class="font-bold text-gray-800 mb-3 border-b pb-2">錯題解析 (已自動加入錯題本)</h3>
+                    <div id="r-mistakes-list" class="space-y-4"></div>
+                    <button onclick="resetQuizUI()" class="w-full mt-6 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300">返回題庫首頁</button>
+                </div>
+
+                <!-- 4. 錯題本畫面 -->
+                <div id="quiz-mistakes" class="hidden">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-book-journal-whills mr-2"></i>我的錯題本</h3>
+                        <button onclick="clearMistakes()" class="text-sm text-red-500 hover:underline">清空錯題</button>
+                    </div>
+                    <div id="m-list" class="space-y-4"></div>
+                    <button onclick="resetQuizUI()" class="w-full mt-6 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300">返回題庫首頁</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. 地圖與核心系統初始化
+        // ==========================================
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([23.5, 121], 7);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+        let currentMarkers = [];
+        let currentPolygons = [];
+        let warAnimationLayers = []; // 儲存戰場動畫線條
+        let previousMapState = null; // 儲存手機版點擊前的地圖狀態
+
+        // ==========================================
+        // 2. 海量史料庫 (極致擴充版)
+        // ==========================================
+        const eventsData = [
+            // --- 台灣史 ---
+            { id: 'tw_dabenkeng', era: 'taiwan', period: 'tw_1', type: '歷史', title: '大坌坑文化', lat: 25.15, lng: 121.42, location: '新北八里', time: '約7000年前', icon: 'fa-seedling', color: 'color-tw', background: '冰河期結束，海平面上升，台灣成為島嶼，南島語族祖先乘船抵達台灣，帶來了全新的生活方式。', process: '這是台灣新石器時代早期的代表。先民開始種植根莖類作物(如芋頭、番薯)，並懂得製作帶有粗繩紋的陶器來儲存食物，也開始使用磨製石器，形成定居聚落。', impact: '大坌坑文化被廣泛認為是整個南島語族(分佈至夏威夷、紐西蘭、馬達加斯加)的祖先文化，證明台灣是南島語族的發源地或重要擴散點。', exam: '【必考】新石器時代三大特徵：農業出現、陶器製作、磨製石器。常與南島語族的起源合併考出。' },
+            { id: 'tw_dutch', era: 'taiwan', period: 'tw_1', type: '歷史', title: '荷蘭統治與郭懷一事件', lat: 23.00, lng: 120.16, location: '台南安平', time: '1624-1662', icon: 'fa-ship', color: 'color-tw', relations: '【荷蘭東印度公司(VOC)】 vs 【漢人/原住民】', background: '17世紀大航海時代，荷蘭為尋求與中國、日本貿易的據點，在被明朝驅逐出澎湖後，轉而佔領台灣南部(大員)。', process: '荷蘭人建立熱蘭遮城，引進黃牛與豌豆。為榨取經濟利益，對漢人課徵重稅(人頭稅)，對原住民實施「贌社制」(將村落交易權發包給漢人商人)。1652年，因稅賦過重與氣候歉收，爆發漢人領袖郭懷一領導的大規模武裝抗荷事件，但遭荷蘭聯合原住民鎮壓。', impact: '台灣首次被納入全球「白銀貿易網」，成為鹿皮、蔗糖的轉口貿易中心；新港文書(羅馬拼音寫成的原住民語)成為台灣最早的文字紀錄。', exam: '【必考】郭懷一事件的原因(苛政重稅)、荷治時期的經濟特徵(轉口貿易、重商主義)、新港文書的文化意義。' },
+            { id: 'tw_cheng', era: 'taiwan', period: 'tw_1', type: '歷史', title: '明鄭時期與軍屯', lat: 22.99, lng: 120.20, location: '台南', time: '1662-1683', icon: 'fa-flag', color: 'color-tw', relations: '【明鄭(鄭成功/鄭經)】 vs 【清朝】', background: '滿清入關後，鄭成功為建立「反清復明」的基地，率軍驅逐荷蘭人。清廷為防堵鄭氏，實施嚴格的「海禁」與「遷界令」，斷絕沿海物資。', process: '為解決數萬軍隊的糧食問題，鄭氏實施「軍屯政策」(寓兵於農)，軍隊平時種田、戰時打仗。參軍陳永華建立「全台首學」(台南孔廟)，推動儒家教育與科舉。', impact: '大量漢人(主要是軍民)移入台灣，確立了台灣漢人社會與文化的雛形。', exam: '【必考】軍屯政策留下的地名(如：左營、前鎮、新營)。清朝「海禁與遷界令」對台灣及東南沿海經濟的打擊。' },
+            { id: 'tw_lin', era: 'taiwan', period: 'tw_2', type: '歷史', title: '林爽文事件', lat: 24.08, lng: 120.54, location: '彰化大里杙', time: '1786年', icon: 'fa-khanda', color: 'color-tw', relations: '【天地會(林爽文)】 vs 【清廷(福康安)】', background: '清領前期，台灣吏治敗壞，加上渡台禁令導致男女比例失衡，社會上充斥無業遊民(羅漢腳)，治安敗壞，俗諺稱「三年一小反，五年一大亂」。', process: '天地會領袖林爽文在彰化起事，勢力迅速蔓延全台。清廷震驚，派陝甘總督福康安率大軍渡海來台，並利用台灣內部的分類械鬥(泉州人、客家人組成的義民軍協助清軍)才將其平定。', impact: '平定後，乾隆皇帝為嘉獎諸羅縣民守城有功，將「諸羅」改名為「嘉義」。', exam: '【必考】清代三大民變(朱一貴、林爽文、戴潮春)的共同背景(官逼民反、羅漢腳多)。「嘉義」地名的由來。' },
+            { id: 'tw_mudan', era: 'taiwan', period: 'tw_2', type: '歷史', title: '牡丹社事件', lat: 22.13, lng: 120.76, location: '屏東恆春', time: '1874年', icon: 'fa-burst', color: 'color-tw', relations: '【日本】 vs 【排灣族】 (清廷調停)', background: '1871年，琉球國船民因船難漂流至台灣南部，遭排灣族原住民殺害。日本明治維新後急欲向外擴張，藉口「懲辦兇手」出兵台灣。', process: '日軍於屏東登陸攻打牡丹社。清廷驚覺事態嚴重，派欽差大臣沈葆楨來台交涉。最終清廷賠款，日本撤軍，但清廷在條約中承認日本出兵為「保民義舉」，間接承認琉球為日本屬地。', impact: '此事件成為清廷治台政策的「轉捩點」。沈葆楨開始推動「開山撫番」(修築通往東部的道路)、廢除渡台禁令，並在恆春建城、安平建億載金城。', exam: '【必考】沈葆楨來台的背景(牡丹社事件)。治台政策由消極轉為積極的轉折點。' },
+            { id: 'tw_french', era: 'taiwan', period: 'tw_2', type: '歷史', title: '清法戰爭與台灣建省', lat: 25.13, lng: 121.74, location: '基隆/淡水', time: '1884年', icon: 'fa-anchor', color: 'color-tw', relations: '【清朝(劉銘傳)】 vs 【法國(孤拔艦隊)】', background: '19世紀後期，法國企圖併吞中國的藩屬國「越南」，引發中法戰爭。法軍為取得談判籌碼，將戰火延燒至中國東南沿海與台灣。', process: '法國遠東艦隊司令孤拔率艦封鎖台灣，攻佔基隆。清廷派劉銘傳來台督戰，劉銘傳採取「棄基隆、守滬尾(淡水)」的戰略，成功在淡水擊退法軍登陸。', impact: '戰後，清廷深刻體認台灣的戰略地位(東南七省之門戶)，於1885年宣布「台灣建省」，由劉銘傳擔任首任巡撫，大力推動鐵路、電報、郵政等現代化建設。', exam: '【必考】台灣建省的時間點(1885)與原因(清法戰爭)。劉銘傳的自強新政內容。' },
+            { id: 'tw_shimonoseki', era: 'taiwan', period: 'tw_3', type: '歷史', title: '馬關條約割台', lat: 25.04, lng: 121.51, location: '全台', time: '1895年', icon: 'fa-scroll', color: 'color-tw', relations: '【清朝(李鴻章)】 vs 【日本(伊藤博文)】', background: '1894年因朝鮮問題爆發甲午戰爭，清朝北洋艦隊全軍覆沒，被迫求和。', process: '簽訂《馬關條約》，清朝將台灣、澎湖及遼東半島割讓給日本。台灣仕紳為求自保，成立「台灣民主國」(唐景崧為總統，劉永福守南部)，企圖引發國際干涉，但最終失敗。', impact: '台灣進入長達50年的日治時期，引發長期的武裝抗日運動。', exam: '【必考】甲午戰爭的結果。台灣民主國的性質(非真正獨立，年號「永清」代表心向清朝)。' },
+            { id: 'tw_wushe', era: 'taiwan', period: 'tw_3', type: '歷史', title: '霧社事件', lat: 24.02, lng: 121.13, location: '南投仁愛鄉', time: '1930年', icon: 'fa-mountain', color: 'color-tw', relations: '【賽德克族(莫那魯道)】 vs 【日本總督府】', background: '日本總督府為開發山區林木資源，實施嚴苛的「理蕃政策」，長期剝削原住民勞力，並干涉其傳統文化。', process: '賽德克族馬赫坡社頭目莫那魯道，趁霧社公學校舉辦運動會時發動突襲，殺死百餘名日本人。日軍隨後調派飛機、大砲，甚至違反國際法使用毒氣彈進行殘酷鎮壓。', impact: '震驚日本內閣，總督遭撤換。此後理蕃政策由高壓鎮壓轉為「懷柔同化」，加強皇民化教育。', exam: '【必考】日治時期規模最大的原住民抗日事件。理蕃政策的轉折點。' },
+            { id: 'tw_228', era: 'taiwan', period: 'tw_4', type: '歷史', title: '二二八事件', lat: 25.05, lng: 121.51, location: '台北天馬茶房', time: '1947年', icon: 'fa-person-falling-burst', color: 'color-tw', relations: '【台灣民眾】 vs 【國民政府(陳儀)】', background: '二戰後台灣光復，但國民政府行政長官公署施政失當、貪污腐敗，加上將台灣物資大量運往大陸支援國共內戰，導致台灣惡性通貨膨脹、失業率飆升，官民矛盾極深。', process: '1947年2月27日，專賣局查緝員在台北查緝私菸時打傷小販並誤殺路人，引爆群眾怒火。2月28日民眾請願遭機槍掃射，衝突迅速蔓延全台。隨後國民政府自大陸調派軍隊來台進行武力鎮壓與清鄉。', impact: '造成大量台灣本土菁英傷亡，社會陷入長期恐懼(白色恐怖的開端)，並埋下深遠的省籍對立與台灣獨立運動的種子。', exam: '【必考】爆發的深層經濟與政治背景(通膨、失業、專賣制度)。對台灣社會心理與政治發展的長遠影響。' },
+            { id: 'tw_10projects', era: 'taiwan', period: 'tw_4', type: '歷史', title: '十大建設', lat: 24.14, lng: 120.68, location: '全台', time: '1970年代', icon: 'fa-bridge', color: 'color-tw', relations: '【中華民國政府(蔣經國)】', background: '1970年代，台灣面臨嚴峻挑戰：外交上退出聯合國(1971)、遭遇第一次全球石油危機(1973)導致經濟衰退，且原有的輕工業基礎設施已不敷使用。', process: '行政院長蔣經國推動十項大型基礎與重工業建設，包含：中山高速公路、鐵路電氣化、北迴鐵路、桃園國際機場、台中港、蘇澳港、大造船廠、大煉鋼廠(中鋼)、石化工業與核能發電廠。', impact: '成功帶動台灣產業由「輕工業」升級為「重化工業」，度過經濟危機，促成台灣經濟起飛，名列亞洲四小龍。', exam: '【必考】推動的國內外背景(石油危機、外交挫折)。產業轉型的方向(重化工業)。' },
+
+            // --- 中國史 ---
+            { id: 'cn_qin', era: 'china', period: 'cn_1', type: '歷史', title: '秦始皇大一統', lat: 34.26, lng: 108.93, location: '咸陽', time: '西元前221年', icon: 'fa-chess-king', color: 'color-cn', background: '歷經數百年的春秋戰國分裂與兼併，秦國憑藉商鞅變法富國強兵，最終由秦王嬴政滅六國，統一天下。', process: '嬴政自稱「始皇帝」。政治上廢除封建制，全面推行「郡縣制」(官員由中央任免，不得世襲)；經濟文化上統一文字(小篆)、度量衡、車軌；軍事上修築萬里長城抵禦匈奴；思想上實施焚書坑儒。', impact: '雖然秦朝因暴政二世而亡，但其創立的「中央集權皇帝制度」與「郡縣制」深深影響了中國兩千多年的政治格局。', exam: '【必考】郡縣制與封建制的本質差異(官員是否世襲、中央集權程度)。統一措施對文化認同的影響。' },
+            { id: 'cn_han', era: 'china', period: 'cn_1', type: '歷史', title: '張騫通西域', lat: 39.46, lng: 75.98, location: '西域(新疆至中亞)', time: '西漢', icon: 'fa-camel', color: 'color-cn', relations: '【漢武帝】 vs 【匈奴】', background: '西漢初年對匈奴採取和親政策，但匈奴仍不斷侵擾。漢武帝即位後決定轉守為攻，為尋找被匈奴驅逐的大月氏人結盟夾擊匈奴，派遣張騫出使西域。', process: '張騫歷經千辛萬苦，兩度被匈奴扣留，雖最終未能達成軍事同盟的目的，卻帶回了西域各國的地理、物產與軍事情報。', impact: '意外開通了連接歐亞大陸的「絲綢之路」。中國的絲綢、冶鐵技術西傳；西域的汗血馬、葡萄、核桃、胡蘿蔔及「佛教」傳入中國，促成東西方文化大交流。', exam: '【必考】出使的原始目的(軍事/聯絡大月氏)與實際結果(經濟文化交流、開通絲路)的對比。' },
+            { id: 'cn_song', era: 'china', period: 'cn_2', type: '歷史', title: '宋代商業革命', lat: 34.79, lng: 114.30, location: '汴京(開封)', time: '宋代', icon: 'fa-coins', color: 'color-cn', background: '宋代雖然軍事積弱(外患頻仍)，但農業技術大突破(引進占城稻，推廣梯田)，糧食產量大增，帶動了手工業與商業的空前繁榮。', process: '打破了唐代以前嚴格的「坊市制度」(住宅區與商業區分離，且有宵禁)。宋代商店可臨街開設，出現了「夜市」與「早市」。因貿易量龐大，銅錢不敷使用，四川地區富商發行了世界最早的紙幣「交子」。海上貿易發達，設立「市舶司」管理。', impact: '中國經濟重心完全南移至江南地區。城市庶民文化興盛(如瓦子、勾欄中的說書、雜劇)。', exam: '【必考】坊市制度的瓦解。世界最早的紙幣(交子)。市舶司的功能(類似現代海關)。' },
+            { id: 'cn_opium', era: 'china', period: 'cn_3', type: '歷史', title: '鴉片戰爭', lat: 22.28, lng: 114.16, location: '廣東/香港', time: '1840年', icon: 'fa-skull-crossbones', color: 'color-cn', relations: '【清朝】 vs 【英國】', background: '清朝實施閉關自守(僅限廣州一口通商)。英國為扭轉對華貿易逆差(購買大量茶葉、絲綢)，開始從印度走私鴉片入華，導致中國白銀大量外流、國民健康受損。林則徐受命至廣州虎門銷煙。', process: '英國以此為藉口發動戰爭，憑藉工業革命後的「船堅炮利」擊敗裝備落後的清軍。', impact: '1842年簽訂中國近代第一個不平等條約《南京條約》。割讓香港島、賠款、開放五口通商(廣州、廈門、福州、寧波、上海)，並喪失協定關稅與領事裁判權(治外法權)。標誌中國近代史的開端。', exam: '【必考】《南京條約》的具體內容與喪失的主權(領事裁判權破壞司法主權)。' },
+            { id: 'cn_xinhai', era: 'china', period: 'cn_3', type: '歷史', title: '辛亥革命', lat: 30.59, lng: 114.30, location: '武昌', time: '1911年', icon: 'fa-bomb', color: 'color-cn', relations: '【革命黨(孫中山)】 vs 【清廷】', background: '清末列強瓜分危機加劇，清廷的立憲運動被證明是「皇族內閣」的騙局。四川爆發「保路運動」(抗議清廷將民營鐵路收歸國有並抵押給外國)，清廷調派湖北新軍前往鎮壓，導致武昌防務空虛。', process: '1911年10月10日，留在武昌的革命黨人(新軍)發動起義，成功佔領武昌。隨後南方各省紛紛響應宣布獨立。', impact: '1912年1月1日中華民國成立，孫中山就任臨時大總統。隨後清帝退位，正式終結了中國兩千多年的君主專制帝制，建立亞洲第一個民主共和國。', exam: '【必考】武昌起義的導火線(保路運動)。辛亥革命的歷史意義(推翻帝制而非推翻外族)。' },
+            { id: 'cn_reform', era: 'china', period: 'cn_4', type: '歷史', title: '改革開放', lat: 22.54, lng: 114.05, location: '深圳', time: '1978年起', icon: 'fa-chart-line', color: 'color-cn', relations: '【中共(鄧小平)】', background: '經歷了「大躍進」與「文化大革命」十年浩劫後，中國大陸經濟瀕臨崩潰。1978年鄧小平掌握實權，決定放棄階級鬥爭，轉向經濟建設。', process: '對內實施農村改革(家庭聯產承包責任制)；對外實施「開放」，在東南沿海(廣東、福建)設立「經濟特區」(如深圳、珠海、廈門)，利用當地臨海及僑鄉的優勢，引進外資、技術與管理經驗。', impact: '中國經濟高速成長，逐漸成為「世界工廠」。但也帶來了嚴重的貧富差距、城鄉差距(盲流問題)以及環境污染。政治上仍維持共產黨一黨專政(導致六四天安門事件)。', exam: '【必考】經濟特區的區位條件選擇(臨海、僑鄉)。改革開放對全球產業鏈的影響及衍生的社會問題。' },
+
+            // --- 世界史 ---
+            { id: 'w_greece', era: 'world', period: 'w_1', type: '歷史', title: '古希臘城邦政治', lat: 37.98, lng: 23.72, location: '雅典/斯巴達', time: '上古時代', icon: 'fa-building-columns', color: 'color-world', background: '希臘半島多山、海岸線曲折，地形崎嶇阻礙了陸上交通與統一，因此發展出許多各自獨立的「城邦」(Polis)。', process: '最著名的兩個城邦：雅典發展出「直接民主政治」(成年男性公民可參與公民大會投票)；斯巴達則實施嚴格的「軍國主義」統治。', impact: '古希臘成為西方文明的搖籃，在哲學(蘇格拉底、柏拉圖、亞里斯多德)、史學、戲劇與奧林匹克運動會上留下深遠影響。', exam: '【必考】地理環境(多山)如何影響政治發展(形成獨立城邦)。雅典民主的限制(婦女、奴隸、外邦人無參政權)。' },
+            { id: 'w_discovery', era: 'world', period: 'w_2', type: '歷史', title: '地理大發現', lat: 38.72, lng: -9.13, location: '伊比利半島', time: '15-16世紀', icon: 'fa-compass', color: 'color-world', relations: '【葡萄牙 / 西班牙】', background: '15世紀，鄂圖曼土耳其帝國崛起，阻斷了歐洲通往亞洲的傳統陸路貿易路線。歐洲人為了獲取東方的香料與絲綢，加上羅盤的傳入與造船技術進步，開始向海上尋求新航路。', process: '葡萄牙向東發展(達伽馬繞過非洲好望角抵達印度)；西班牙向西發展(哥倫布發現美洲新大陸，麥哲倫船隊完成人類首次環球航行)。', impact: '引發「商業革命」，世界貿易中心由地中海轉移至大西洋沿岸。美洲古文明(印加、阿茲特克)遭歐洲人帶來的天花與武力滅絕。全球「白銀貿易網」建立，美洲的玉米、馬鈴薯傳入舊大陸，改變了全球人口結構。', exam: '【必考】航海家的路線配對。地理大發現對美洲原住民的毀滅性打擊及「物種大交換」。' },
+            { id: 'w_indrev', era: 'world', period: 'w_2', type: '歷史', title: '工業革命', lat: 53.48, lng: -2.24, location: '英國', time: '18世紀中葉', icon: 'fa-industry', color: 'color-world', background: '英國具備了發生工業革命的完美條件：光榮革命後政治安定、擁有豐富的煤鐵資源、圈地運動提供大量廉價勞工、廣大海外殖民地提供原料與市場。', process: '從「紡織業」開始機器化。瓦特改良「蒸汽機」，打破了工廠必須依水而建的限制，並促成了火車與汽船的發明，引發交通革命。', impact: '人類社會由農業時代進入工業時代，「工廠制度」確立。但也產生了嚴重的勞資對立、貧富不均與都市貧民窟問題，進而催生了「社會主義」(如馬克思)與向外擴張搶奪原料市場的「新帝國主義」。', exam: '【必考】為何發源於英國的條件。蒸汽機帶來的變革。工業革命引發的社會問題與新帝國主義。' },
+            { id: 'w_ww1', era: 'world', period: 'w_3', type: '歷史', title: '第一次世界大戰 (含動畫)', lat: 43.85, lng: 18.41, location: '歐洲戰場', time: '1914-1918', icon: 'fa-person-rifle', color: 'color-world', relations: '【協約國(英法俄)】 vs 【同盟國(德奧土)】', background: '19世紀末新帝國主義國家間為爭奪殖民地產生激烈摩擦，形成兩大軍事同盟。巴爾幹半島因民族問題複雜，被稱為「歐洲火藥庫」。', process: '1914年奧匈帝國皇儲在塞拉耶佛遭塞爾維亞青年暗殺，引爆大戰。德國實施「施里芬計畫」企圖速戰速決，但陷入漫長殘酷的「壕溝戰」。戰爭中首次大量使用毒氣、戰車、飛機與潛艇。1917年美國因德國無限制潛艇戰而參戰，俄國則因爆發共產革命而退出。', impact: '同盟國戰敗，四大帝國(德、奧、俄、土)瓦解。戰後召開巴黎和會，簽訂《凡爾賽條約》嚴懲德國，埋下二戰禍根。成立國際聯盟但美國未加入。', exam: '【必考】大戰導火線(塞拉耶佛事件)。新型武器與總力戰的特徵。巴黎和會的報復性質。', triggerAnim: 'ww1' },
+            { id: 'w_ww2', era: 'world', period: 'w_3', type: '歷史', title: '第二次世界大戰 (含動畫)', lat: 49.33, lng: -0.87, location: '歐亞非全球', time: '1939-1945', icon: 'fa-fighter-jet', color: 'color-world', relations: '【同盟國(美英蘇中)】 vs 【軸心國(德義日)】', background: '1929年全球經濟大恐慌，德、義、日等國為解決國內經濟危機，走向「極權主義」(法西斯與納粹)，對外侵略擴張。英法初期採取姑息政策(綏靖政策)。', process: '1939年德國閃擊波蘭，二戰爆發。1941年日本偷襲珍珠港，美國參戰，戰火擴及太平洋。1944年盟軍發動「諾曼第登陸」，開闢歐洲第二戰場，夾擊德國。1945年美國對日本投下兩顆原子彈，二戰結束。', impact: '聯合國成立。歐洲衰退，美蘇崛起成為超級強權，世界進入長達半世紀的「冷戰」對立格局。', exam: '【必考】極權主義崛起的經濟背景。美國參戰的轉折點(珍珠港)。二戰後冷戰格局的形成。', triggerAnim: 'ww2' },
+
+            // --- 地理與氣候 ---
+            { id: 'geo_malacca', era: 'geo', period: 'all', type: '地理', title: '麻六甲海峽', lat: 2.87, lng: 101.35, location: '東南亞', time: '現代', icon: 'fa-ship', color: 'color-geo', background: '位於馬來半島與蘇門答臘島之間，是連接印度洋與太平洋的最短海上航道。', process: '自古以來就是海上絲路的必經之地。現代更是中東石油運往東亞(中國、日本、台灣)的「海上生命線」。', impact: '新加坡憑藉扼守此海峽的優勢，發展成為世界級的轉口貿易港與金融中心。', exam: '【必考】地圖位置判斷。對東亞國家能源運輸的致命重要性。' },
+            { id: 'geo_panama', era: 'geo', period: 'all', type: '地理', title: '巴拿馬運河', lat: 9.14, lng: -79.73, location: '中美洲', time: '現代', icon: 'fa-water', color: 'color-geo', background: '切斷中美地峽，連接大西洋與太平洋的人工運河。', process: '採用船閘式設計(因兩洋水位不同)。大幅縮短了美國東岸到西岸，以及歐洲到亞洲的航程，不需再繞過南美洲南端的麥哲倫海峽。', impact: '長期由美國控制(直至1999年交還)，是美國維持全球霸權的重要戰略與經濟通道。近年受氣候變遷乾旱影響，運河水位下降導致通行受阻(時事題)。', exam: '【必考】重要運河位置判斷。時事題：極端氣候對全球供應鏈的影響。' }
+        ];
+
+        // 氣候區 Polygon 資料
+        const climateZones = [
+            { name: "熱帶雨林氣候", type: "地理/氣候", exam: "高溫多雨，對流雨為主。農業為游耕或熱帶栽培業(印尼/巴西)。", color: "#16a34a", bounds: [[5, -78], [-15, -45]], bounds2: [[5, 95], [-10, 140]] },
+            { name: "溫帶地中海型氣候", type: "地理/氣候", exam: "夏乾冬雨！必考降雨圖。適合種植葡萄、橄欖。行星風系季移造成。", color: "#eab308", bounds: [[45, -5], [30, 40]], bounds2: [[30, -125], [40, -115]] },
+            { name: "熱帶沙漠氣候", type: "地理/氣候", exam: "副熱帶高氣壓籠罩(如撒哈拉)或背風側。終年少雨，日夜溫差大。", color: "#d97706", bounds: [[30, -15], [15, 35]], bounds2: [[-20, 115], [-30, 140]] }
+        ];
+
+        // ==========================================
+        // 3. 100 題素養題庫資料 (極度壓縮格式以符合長度限制)
+        // 格式: {id, s(subject), c(category), q(question), o(options array), a(answer index), ex(explanation)}
+        // ==========================================
+        const quizData = [
+            // 台灣史 (25題)
+            {id:1, s:'history', c:'taiwan', q:'某生參觀博物館，看到一件帶有粗繩紋的陶罐，解說牌寫著「這是台灣最早懂得種植根莖類作物的先民遺物」。這最可能是哪個文化的遺址？', o:['長濱文化','大坌坑文化','十三行文化','卑南文化'], a:1, ex:'大坌坑文化是台灣新石器時代早期代表，特徵為粗繩紋陶與初級農業(根莖類)。長濱是舊石器，十三行是鐵器。'},
+            {id:2, s:'history', c:'taiwan', q:'17世紀，一份荷蘭東印度公司的報告指出：「今年的鹿皮收成極佳，我們將其運往日本換取白銀，再用白銀去大明國購買絲綢。」這反映了當時台灣的何種經濟特徵？', o:['自給自足的農業','重商主義下的轉口貿易','工業化生產','朝貢貿易'], a:1, ex:'荷治時期台灣被納入全球貿易網，作為中國、日本、東南亞物資的轉口站，屬於重商主義的經濟掠奪。'},
+            {id:3, s:'history', c:'taiwan', q:'小明在台南市地圖上看到「左營」、「前鎮」、「新營」等地名。這些地名的由來與下列哪個歷史事件最相關？', o:['荷蘭人實施贌社制','鄭成功實施軍屯政策','清朝實施開山撫番','日本實施理蕃政策'], a:1, ex:'明鄭時期為解決數萬大軍的糧食問題，實施「寓兵於農」的軍屯政策，軍隊駐紮開墾之地多帶有「營」、「鎮」字。'},
+            {id:4, s:'history', c:'taiwan', q:'清代文獻記載：「台灣地廣人稀，內地無業遊民偷渡來台者眾。這些人無家室，常因細故結黨械鬥，甚至豎旗造反。」這段話描述的社會背景最容易引發下列哪一事件？', o:['郭懷一事件','林爽文事件','牡丹社事件','二二八事件'], a:1, ex:'清代台灣因渡台禁令導致男多女少，產生大量單身無業遊民(羅漢腳)，成為社會動盪與民變(如林爽文事件)的根源。'},
+            {id:5, s:'history', c:'taiwan', q:'某條約簽訂後，清廷官員感嘆：「從此台灣孤懸海外，朝廷鞭長莫及，只能任由倭人蹂躪。」此條約簽訂的背景為何？', o:['英法聯軍戰敗','清法戰爭戰敗','甲午戰爭戰敗','八國聯軍戰敗'], a:2, ex:'甲午戰爭清朝戰敗，簽訂《馬關條約》將台灣割讓給日本(倭人)。'},
+            {id:6, s:'history', c:'taiwan', q:'1930年，某原住民部落因不堪長期勞役剝削，在運動會上突襲統治者。事後，統治當局檢討政策，改以「皇民化」等同化手段代替高壓鎮壓。此事件為？', o:['西來庵事件','霧社事件','牡丹社事件','苗栗事件'], a:1, ex:'霧社事件是日治時期最大的原住民武裝抗日，促使總督府改變理蕃政策。'},
+            {id:7, s:'history', c:'taiwan', q:'阿公回憶年輕時：「那時候政府剛撤退來台灣，物價一天漲好幾次，買一碗麵要帶一大疊鈔票。後來又發生查緝私菸打死人的事，全台灣都亂了。」阿公經歷的是哪個事件的背景？', o:['美麗島事件','二二八事件','野百合學運','中壢事件'], a:1, ex:'戰後初期台灣面臨惡性通貨膨脹與嚴重的官民衝突，最終因查緝私菸引爆二二八事件。'},
+            {id:8, s:'history', c:'taiwan', q:'1970年代，台灣面臨退出聯合國與國際石油危機的雙重打擊。為突破困境，政府推動了哪一項重大政策，成功帶動產業升級？', o:['耕者有其田','十大建設','加入世界貿易組織(WTO)','亞太營運中心'], a:1, ex:'蔣經國推動十大建設(重化工業與基礎交通)，幫助台灣度過經濟危機並促成經濟起飛。'},
+            {id:9, s:'history', c:'taiwan', q:'清代台灣有一句俗諺：「一個某(妻)，卡贏三個天公祖。」這反映了當時何種社會現象？', o:['宗教信仰式微','女性地位極高','渡台禁令導致男女比例嚴重失衡','原住民母系社會的影響'], a:2, ex:'清廷初期禁止攜帶家眷渡台，導致台灣漢人社會男多女少，娶妻極為困難。'},
+            {id:10, s:'history', c:'taiwan', q:'「他來台後，不僅擊退了外國艦隊的進攻，更在戰後被任命為首任巡撫，在台北架設電報、鋪設鐵路，讓台灣邁向現代化。」這位歷史人物是？', o:['沈葆楨','劉銘傳','丁日昌','邵友濂'], a:1, ex:'劉銘傳在清法戰爭中守住台灣，戰後台灣建省(1885)，他擔任首任巡撫並大力推動自強新政。'},
+            {id:11, s:'history', c:'taiwan', q:'日治時期，台灣總督府為有效控制社會、宣達政令，並協助警察維持治安，嚴格實施了哪一項源自清代的基層組織制度？', o:['保甲制度','軍屯制度','贌社制度','郊商制度'], a:0, ex:'日本總督府利用保甲制度(十戶一甲，十甲一保)實施連坐法，嚴密控制台灣基層社會。'},
+            {id:12, s:'history', c:'taiwan', q:'某時期台灣的出口商品中，「蔗糖」與「米」佔了絕大比例，且主要輸往日本，被稱為「工業日本，農業台灣」。這是哪個時期？', o:['荷治時期','清領前期','日治前期','戰後初期'], a:2, ex:'日治前期總督府為配合日本國內需求，在台灣大力發展糖業與米業(蓬萊米)。'},
+            {id:13, s:'history', c:'taiwan', q:'1920年代，林獻堂、蔣渭水等人成立「台灣文化協會」，他們最主要的抗爭方式是？', o:['武裝游擊戰','發動工人罷工','舉辦演講與發行報刊啟迪民智','向國際聯盟請願獨立'], a:2, ex:'1920年代後，台灣人的抗日運動由武裝抗日轉為非武裝的政治與文化啟蒙運動。'},
+            {id:14, s:'history', c:'taiwan', q:'戰後台灣經濟發展歷程中，1960年代政府在高雄設立「加工出口區」。此政策的主要目的是？', o:['發展重工業','利用廉價勞力吸引外資，拓展外銷','推動農業機械化','發展高科技資訊產業'], a:1, ex:'1960年代為「出口導向」時期，利用台灣廉價勞動力加工進口原料後外銷，賺取外匯。'},
+            {id:15, s:'history', c:'taiwan', q:'清代台灣的「郊」是一種什麼性質的組織？', o:['武裝自衛團體','原住民部落聯盟','商人組成的同業公會','官方設立的學校'], a:2, ex:'「郊」是清代台灣從事兩岸貿易的商人同業公會，如北郊、南郊、泉郊。'},
+            {id:16, s:'history', c:'taiwan', q:'「開山撫番」政策的推動，與下列哪一個外力侵略事件有直接因果關係？', o:['鴉片戰爭','英法聯軍','牡丹社事件','清法戰爭'], a:2, ex:'牡丹社事件讓清廷驚覺東部後山防務空虛，沈葆楨來台後開始推動開山撫番。'},
+            {id:17, s:'history', c:'taiwan', q:'台灣史前文化中，哪一個文化已經懂得煉鐵，並且有與海外貿易的玻璃珠等陪葬品？', o:['長濱文化','大坌坑文化','卑南文化','十三行文化'], a:3, ex:'十三行文化是台灣金屬器(鐵器)時代的代表，位於北部，有豐富的對外貿易遺跡。'},
+            {id:18, s:'history', c:'taiwan', q:'日治末期，總督府推動「皇民化運動」，要求台灣人改日本姓名、參拜神社。其主要背景為何？', o:['慶祝台灣始政五十週年','配合中日戰爭與太平洋戰爭的動員需求','壓制台灣文化協會的活動','回應台灣人設置議會的請願'], a:1, ex:'1937年中日戰爭爆發後，日本為確保台灣人的忠誠並徵調人力物資，全面推動皇民化。'},
+            {id:19, s:'history', c:'taiwan', q:'1987年，中華民國政府宣布解除長達38年的「戒嚴令」。這項決定的主要影響不包括下列何者？', o:['開放黨禁，政黨政治成形','開放報禁，言論自由提升','開放大陸探親，兩岸開始交流','終止動員桘亂時期，總統直接民選'], a:3, ex:'總統直接民選是在1996年(李登輝時期)才實現，並非解嚴當下立刻發生的事。'},
+            {id:20, s:'history', c:'taiwan', q:'清領時期，台灣的行政區劃由「一府三縣」逐漸擴增，最後甚至「建省」。這種演變最主要反映了什麼趨勢？', o:['原住民人口大量增加','漢人不斷向北、向內山拓墾，且台灣戰略地位提升','清廷為了防範日本侵略而隨意劃分','台灣已經完全工業化'], a:1, ex:'行政區的增加(如增設噶瑪蘭廳、台北府)反映了漢人拓墾的腳步，建省則是因為戰略地位提升。'},
+            {id:21, s:'history', c:'taiwan', q:'荷蘭人統治台灣期間，為了增加農業產量，採取了哪一項措施？', o:['引進占城稻','招募漢人來台開墾並提供黃牛與農具','實施耕者有其田','強制原住民種植茶葉'], a:1, ex:'荷蘭人為發展農業，大量招募中國東南沿海的漢人來台，並提供生產工具。'},
+            {id:22, s:'history', c:'taiwan', q:'「唐山過台灣，心肝結歸丸」這句俗諺，最能反映清代渡台移民面臨的哪一種困境？', o:['台灣氣候寒冷不適居住','渡過台灣海峽(黑水溝)極度危險','台灣沒有可開墾的土地','原住民的武力裝備遠勝漢人'], a:1, ex:'台灣海峽海象險惡，加上早期多為偷渡，船隻簡陋，移民九死一生。'},
+            {id:23, s:'history', c:'taiwan', q:'二戰後，政府在台灣推行「三七五減租」、「公地放領」與「耕者有其田」政策。這些政策的共同目的是？', o:['發展高科技產業','解決農村土地分配不均，穩定社會並提高農業生產','懲罰日治時期的地主','將農業人口轉移至服務業'], a:1, ex:'這是戰後初期的土地改革，成功提高了農民生產意願，並將地主的資金轉移至工業。'},
+            {id:24, s:'history', c:'taiwan', q:'台灣民主國的國旗是「藍地黃虎旗」，其設計理念與當時的清朝國旗「黃龍旗」有呼應之意。這說明台灣民主國的建立初衷是？', o:['建立完全獨立的新國家','尋求英國的保護','以「抗日保台」為目的，仍奉清朝為正朔','推翻清朝的統治'], a:2, ex:'台灣民主國年號「永清」，虎旗不敢僭越龍旗，顯示其目的是抗拒日本接收，心向清朝。'},
+            {id:25, s:'history', c:'taiwan', q:'1990年代，台灣爆發「野百合學運」，學生在中正紀念堂靜坐抗議。他們最主要的訴求是？', o:['要求降低大學學費','抗議政府加入WTO','要求解散萬年國會，全面改選','抗議核四廠興建'], a:2, ex:'野百合學運促成了李登輝總統召開國是會議，終結了自大陸撤退後未曾改選的第一屆中央民代(萬年國會)。'},
+
+            // 中國史 (25題)
+            {id:26, s:'history', c:'china', q:'某朝代建立後，皇帝下令：「天下分為三十六郡，郡守由朝廷直接任命，不得世襲。全國使用統一的文字與度量衡。」這是哪個朝代？', o:['西周','秦朝','漢朝','唐朝'], a:1, ex:'秦始皇廢封建行郡縣，建立中央集權，並統一文字度量衡。'},
+            {id:27, s:'history', c:'china', q:'漢武帝派遣張騫出使西域，其最初的軍事戰略目的是什麼？', o:['尋找傳說中的仙藥','開闢絲綢之路進行貿易','聯絡大月氏夾擊匈奴','宣揚大漢國威'], a:2, ex:'漢武帝為了解除匈奴威脅，希望聯絡被匈奴趕走的大月氏結盟，雖未成功但意外開通絲路。'},
+            {id:28, s:'history', c:'china', q:'唐朝由盛轉衰的關鍵轉捩點，導致北方殘破、引發後續藩鎮割據的事件是？', o:['黃巾之亂','八王之亂','安史之亂','靖康之禍'], a:2, ex:'唐玄宗晚年爆發安史之亂，嚴重破壞北方經濟，從此唐朝陷入藩鎮割據的局面。'},
+            {id:29, s:'history', c:'china', q:'宋代城市圖卷《清明上河圖》中，可以看到商店臨街開設，甚至有賣夜宵的攤販。這與唐代長安城有何最大不同？', o:['宋代沒有外國商人','宋代打破了坊市分離與宵禁制度','唐代完全禁止商業活動','宋代城市皆建於水上'], a:1, ex:'宋代商業革命的一大特徵就是坊市制度瓦解，出現夜市，商業活動不再受時間與空間嚴格限制。'},
+            {id:30, s:'history', c:'china', q:'明成祖時期，派遣鄭和七次下西洋，其船隊規模龐大，最遠抵達非洲東岸。此舉最主要的目的是？', o:['尋找黃金與香料','宣揚國威與尋找建文帝','建立海外殖民地','傳播佛教'], a:1, ex:'鄭和下西洋主要屬政治目的(朝貢貿易、宣揚國威)，與歐洲大航海時代的經濟掠奪目的不同。'},
+            {id:31, s:'history', c:'china', q:'1842年，清朝官員被迫在英國軍艦上簽訂條約，同意割讓香港島並開放五口通商。此戰爭爆發的導火線為？', o:['英國使節不願向清帝下跪','林則徐虎門銷煙','法國傳教士被殺害','日本出兵朝鮮'], a:1, ex:'英國為保護其非法的鴉片走私貿易，以林則徐銷煙為藉口發動鴉片戰爭。'},
+            {id:32, s:'history', c:'china', q:'「這場運動起因於清廷將民營鐵路收歸國有，並抵押給外國銀行。四川民眾群起抗爭，清廷調派湖北軍隊鎮壓，意外促成了武昌起義的成功。」此運動為？', o:['義和團運動','保路運動','五四運動','新文化運動'], a:1, ex:'保路運動是辛亥革命(武昌起義)的直接導火線。'},
+            {id:33, s:'history', c:'china', q:'1978年後，中國大陸在東南沿海設立「經濟特區」，其選擇深圳、廈門等地的主要區位優勢為何？', o:['礦產資源豐富','氣候寒冷適合重工業','臨海且為著名僑鄉，易吸引外資','為中國政治中心'], a:2, ex:'經濟特區利用東南沿海的港口優勢與海外華僑的人脈資金，成功吸引外資進入。'},
+            {id:34, s:'history', c:'china', q:'西周實施「宗法制度」，其核心精神是為了解決貴族間的權力與財產繼承問題。此制度的繼承原則是？', o:['立賢不立長','嫡長子繼承制','武力強者繼承','抽籤決定'], a:1, ex:'宗法制以「嫡長子繼承」為核心，區分大宗與小宗，藉此維持封建階級的穩定。'},
+            {id:35, s:'history', c:'china', q:'魏晉南北朝時期，因長期戰亂，世族(門閥)勢力龐大，形成「上品無寒門，下品無世族」的現象。這與當時實施的哪一項選官制度有關？', o:['察舉制','九品官人法','科舉制','八股取士'], a:1, ex:'九品官人法原本由中正官評定人才，後來被世族壟斷，只看家世不看才幹。'},
+            {id:36, s:'history', c:'china', q:'北魏孝文帝推行「漢化運動」，要求鮮卑人穿漢服、說漢語、改漢姓、與漢人通婚。其主要歷史意義為？', o:['導致北魏迅速滅亡','促進了胡漢民族的大融合','引發了五胡亂華','成功消滅了南朝'], a:1, ex:'孝文帝漢化極大地促進了北方游牧民族與漢族的融合，為後來隋唐的強盛奠定基礎。'},
+            {id:37, s:'history', c:'china', q:'唐代被譽為中國歷史上最開放包容的時代，首都長安有大量外國人居住。當時管理海外貿易的官方機構稱為？', o:['總理衙門','市舶司','十三行','海關'], a:1, ex:'唐代在廣州等地設立「市舶司」管理海外貿易，宋元時期繼續沿用並擴大。'},
+            {id:38, s:'history', c:'china', q:'元朝統治中國期間，實施了帶有種族歧視的「四等人制」。其中，原本南宋統治下的漢人被編入哪一等級，地位最低？', o:['蒙古人','色目人','漢人','南人'], a:3, ex:'四等人制依序為：蒙古人、色目人(西域人)、漢人(原金朝統治下的北方人)、南人(最後被征服的南宋人)。'},
+            {id:39, s:'history', c:'china', q:'明朝廢除丞相制度，清朝設立軍機處。這兩項政治變革共同反映了中國古代政治制度的何種發展趨勢？', o:['民主思想萌芽','地方權力擴大','君主專制權力空前強化','文人地位下降'], a:2, ex:'廢丞相讓皇帝直接掌管六部，設軍機處讓皇帝完全控制軍國大政，皆為強化皇權。'},
+            {id:40, s:'history', c:'china', q:'清末民初，知識份子認為中國不僅器物、制度落後，連思想文化都需要徹底改造，因而發起了提倡「德先生(民主)」與「賽先生(科學)」的運動。此為？', o:['自強運動','戊戌變法','新文化運動','文化大革命'], a:2, ex:'新文化運動(五四時期)由陳獨秀、胡適等人發起，主張全盤西化，打倒孔家店。'},
+            {id:41, s:'history', c:'china', q:'1937年，日本藉口士兵失蹤，砲轟宛平縣城，引爆了中國的全面抗戰。此事件為？', o:['九一八事變','一二八事變','七七盧溝橋事變','西安事變'], a:2, ex:'七七事變標誌著八年抗戰的全面爆發。'},
+            {id:42, s:'history', c:'china', q:'中共建政後，在1950年代末期推動了一場企圖「超英趕美」的經濟運動，鼓勵全民大煉鋼鐵、建立人民公社，結果導致嚴重的經濟災難與大饑荒。此運動為？', o:['土地改革','文化大革命','大躍進','改革開放'], a:2, ex:'大躍進因違反經濟規律與浮誇風，造成中國現代史上最嚴重的饑荒。'},
+            {id:43, s:'history', c:'china', q:'1966年至1976年，毛澤東為打擊政敵，發動紅衛兵進行「破四舊、批鬥走資派」的政治運動，造成中國傳統文化與教育體系的毀滅性破壞。此為？', o:['大躍進','文化大革命','六四天安門事件','反右運動'], a:1, ex:'文化大革命被中共官方定調為「十年浩劫」。'},
+            {id:44, s:'history', c:'china', q:'《南京條約》簽訂後，中國喪失了「領事裁判權」。這對中國造成了什麼具體影響？', o:['外國商品可免稅輸入','外國人可在中國內地自由傳教','外國人在中國犯罪，中國法院無權審判','中國必須割讓所有沿海島嶼'], a:2, ex:'領事裁判權(治外法權)嚴重破壞了中國的司法主權。'},
+            {id:45, s:'history', c:'china', q:'清末的「自強運動」與日本的「明治維新」幾乎同時起步，但甲午戰爭的結果卻大不相同。學者多認為自強運動失敗的根本原因是？', o:['缺乏資金','只學習西方的船堅炮利(器物)，未改變腐敗的政治制度','外國拒絕出售武器','沒有建立海軍'], a:1, ex:'自強運動標榜「中學為體，西學為用」，不願觸碰政治體制改革，最終不敵全面西化的日本。'},
+            {id:46, s:'history', c:'china', q:'中國歷史上，哪一個朝代因為實施「重文輕武」政策，導致軍隊戰鬥力低落，最終被北方游牧民族(金、元)所滅？', o:['漢朝','唐朝','宋朝','明朝'], a:2, ex:'宋太祖趙匡胤因陳橋兵變黃袍加身，為防武將篡位而實施強幹弱枝、重文輕武。'},
+            {id:47, s:'history', c:'china', q:'「這條運河溝通了海河、黃河、淮河、長江、錢塘江五大水系，成為中國南北經濟物資交流的大動脈，但也耗費了大量民力導致朝代滅亡。」這是指？', o:['秦代靈渠','隋代大運河','元代京杭大運河','現代南水北調工程'], a:1, ex:'隋煬帝開鑿大運河，雖利於後世經濟，但因濫用民力導致隋朝速亡。'},
+            {id:48, s:'history', c:'china', q:'1919年，因巴黎和會將德國在山東的特權轉交給日本，引發北京學生走上街頭抗議，高呼「外爭主權，內除國賊」。此事件為？', o:['五四運動','五卅慘案','一二九運動','六四事件'], a:0, ex:'五四運動是一場因外交失敗引發的愛國學生運動，並促成了中國代表拒簽凡爾賽條約。'},
+            {id:49, s:'history', c:'china', q:'中共在1930年代面臨國民黨軍隊的圍剿，被迫進行長達兩萬五千里的戰略撤退，最終抵達陝北延安。中共稱此事件為？', o:['北伐','長征','東征','南巡'], a:1, ex:'「長征」是中共黨史上的重要轉折，毛澤東在此期間確立了領導地位。'},
+            {id:50, s:'history', c:'china', q:'中國古代的選官制度中，哪一種制度打破了世家大族對官職的壟斷，讓平民子弟能透過讀書考試進入官僚體系，促進了社會階層流動？', o:['世襲制','察舉制','九品官人法','科舉制'], a:3, ex:'科舉制自隋唐確立後，以考試成績取才，成為中國古代最公平的選官方式。'},
+
+            // 世界史 (25題)
+            {id:51, s:'history', c:'world', q:'古希臘的雅典城邦發展出獨特的「民主政治」，公民可以在公民大會上投票決定國家大事。但下列哪一種人「不具備」雅典的公民資格？', o:['成年的貧窮男性','成年的貴族男性','婦女與奴隸','軍人'], a:2, ex:'雅典的民主是「少數人的民主」，婦女、奴隸與外邦人皆無參政權。'},
+            {id:52, s:'history', c:'world', q:'15世紀末，哥倫布航向大西洋尋找亞洲，卻意外發現了美洲新大陸。他的航行主要得到哪一個國家的王室贊助？', o:['葡萄牙','西班牙','英國','荷蘭'], a:1, ex:'哥倫布受西班牙國王贊助向西航行；葡萄牙則主要向東繞過非洲發展。'},
+            {id:53, s:'history', c:'world', q:'18世紀中葉，工業革命首先發生在英國。下列何者「不是」英國率先爆發工業革命的優勢條件？', o:['擁有豐富的煤鐵礦產','光榮革命後政治安定，保障私有財產','擁有廣大的海外殖民地提供原料','實施嚴格的共產主義經濟計畫'], a:3, ex:'英國實施的是自由市場資本主義，而非共產主義。'},
+            {id:54, s:'history', c:'world', q:'第一次世界大戰爆發的導火線「塞拉耶佛事件」，發生在被稱為「歐洲火藥庫」的哪一個地區？', o:['伊比利半島','亞平寧半島','巴爾幹半島','斯堪地那維亞半島'], a:2, ex:'巴爾幹半島因民族、宗教複雜，加上俄國與奧匈帝國的勢力介入，衝突不斷。'},
+            {id:55, s:'history', c:'world', q:'1929年爆發全球經濟大恐慌，各國受創嚴重。德國與義大利為了解決國內嚴重的失業與經濟崩潰，走上了哪一種政治道路，最終引發二戰？', o:['民主社會主義','極權主義(法西斯與納粹)','自由放任資本主義','無政府主義'], a:1, ex:'極權主義強調國家至上、獨裁統治，並企圖透過對外侵略轉移國內經濟矛盾。'},
+            {id:56, s:'history', c:'world', q:'西元476年，某個曾經將地中海變為「內海」的偉大帝國，其西半部被日耳曼人滅亡，歐洲從此進入中古「黑暗時代」。這個帝國是？', o:['亞歷山大帝國','羅馬帝國','拜占庭帝國','阿拉伯帝國'], a:1, ex:'西羅馬帝國滅亡標誌著歐洲上古時代的結束與中古世紀的開始。'},
+            {id:57, s:'history', c:'world', q:'中古歐洲的社會結構建立在「封建制度」上。這種制度維繫領主與附庸之間關係的核心基礎是什麼？', o:['金錢雇傭關係','土地的封賜與效忠的誓言','血緣宗法關係','宗教信仰的差異'], a:1, ex:'歐洲封建制是契約關係，領主給予土地(采邑)與保護，附庸提供軍事服務與效忠。'},
+            {id:58, s:'history', c:'world', q:'14到16世紀發源於義大利的「文藝復興」運動，其核心精神「人文主義」主張什麼？', o:['一切以神的意志為依歸','強調人的理智、情感與現世的價值','提倡禁慾與苦修','主張用暴力推翻教會'], a:1, ex:'人文主義打破了中古世紀以神為中心的思想，重新肯定人的尊嚴與價值。'},
+            {id:59, s:'history', c:'world', q:'16世紀，馬丁·路德在德國發起「宗教改革」，他強烈反對當時羅馬天主教會的哪一項作為？', o:['修建大教堂','翻譯聖經','販賣贖罪券','組織十字軍'], a:2, ex:'馬丁路德提出《九十五條論綱》，痛斥教會販賣贖罪券斂財，主張「因信稱義」。'},
+            {id:60, s:'history', c:'world', q:'18世紀的「啟蒙運動」提倡理性思考，反對君權神授。其中，提出「三權分立」(行政、立法、司法互相制衡)學說的思想家是？', o:['洛克','盧梭','孟德斯鳩','伏爾泰'], a:2, ex:'孟德斯鳩的《法意》提出三權分立，深刻影響了美國憲法的制定。'},
+            {id:61, s:'history', c:'world', q:'1789年，法國爆發大革命，民眾攻陷巴士底監獄。革命初期頒布了哪一份重要文件，宣告「人生而自由平等」？', o:['權利法案','獨立宣言','人權宣言','大憲章'], a:2, ex:'《人權宣言》是法國大革命的綱領性文件；《獨立宣言》屬美國；《權利法案》屬英國。'},
+            {id:62, s:'history', c:'world', q:'19世紀末，歐洲列強挾著工業革命的優勢，在亞洲與非洲瘋狂搶奪殖民地。這種侵略行為在歷史上被稱為？', o:['舊帝國主義','新帝國主義','重商主義','孤立主義'], a:1, ex:'新帝國主義發生在工業革命後，目的是尋求工業原料與商品傾銷市場。'},
+            {id:63, s:'history', c:'world', q:'第二次世界大戰期間，盟軍為了開闢歐洲第二戰場，減輕蘇聯在東線的壓力，於1944年發動了史上最大規模的兩棲登陸戰。此戰役發生在？', o:['義大利西西里島','法國諾曼第','俄國史達林格勒','北非阿拉曼'], a:1, ex:'諾曼第登陸成功讓盟軍從西線反攻納粹德國。'},
+            {id:64, s:'history', c:'world', q:'二戰結束後，世界形成了以美國為首的資本主義陣營，與以蘇聯為首的共產主義陣營的長期對立。這種不直接發生大規模熱戰的對抗被稱為？', o:['百年戰爭','三十年戰爭','冷戰','星際大戰'], a:2, ex:'冷戰(Cold War)期間雙方透過軍備競賽、太空競賽與代理人戰爭(如韓戰、越戰)進行對抗。'},
+            {id:65, s:'history', c:'world', q:'1989年，象徵冷戰鐵幕的哪一座建築物被民眾推倒，隨後促成了該國的統一與冷戰的終結？', o:['萬里長城','克里姆林宮','柏林圍牆','巴黎鐵塔'], a:2, ex:'柏林圍牆的倒塌是冷戰結束的最重要象徵，隔年東德與西德統一。'},
+            {id:66, s:'history', c:'world', q:'古埃及文明發源於尼羅河流域。希臘史家希羅多德曾說：「埃及是尼羅河的贈禮。」這主要是因為尼羅河的什麼自然現象對農業至關重要？', o:['常年冰凍','定期氾濫帶來肥沃的黑土','河水清澈無沙','河中盛產黃金'], a:1, ex:'尼羅河每年的定期氾濫為兩岸帶來富含養分的泥沙，是古埃及農業繁榮的基礎。'},
+            {id:67, s:'history', c:'world', q:'伊斯蘭教創立於西元7世紀的阿拉伯半島。其創始人是誰？信徒必須遵守的唯一經典是？', o:['耶穌；聖經','釋迦牟尼；佛經','穆罕默德；古蘭經','摩西；妥拉'], a:2, ex:'穆罕默德創立伊斯蘭教，信奉真主阿拉，《古蘭經》為其最高經典。'},
+            {id:68, s:'history', c:'world', q:'17世紀的英國爆發了「清教徒革命」與「光榮革命」，最終確立了哪一種政治體制，使國王的權力受到國會的嚴格限制？', o:['君主專制','君主立憲制','民主共和制','寡頭政治'], a:1, ex:'光榮革命後簽署《權利法案》，確立了「國王統而不治」的君主立憲精神。'},
+            {id:69, s:'history', c:'world', q:'美國獨立戰爭爆發的原因之一，是北美十三州殖民地人民不滿英國政府在未經他們同意的情況下強行徵稅。他們提出的著名口號是？', o:['自由、平等、博愛','無代表，不納稅','主權在民','全世界無產者聯合起來'], a:1, ex:'北美殖民地在英國國會中沒有代表席位，因此拒絕繳納印花稅等稅收。'},
+            {id:70, s:'history', c:'world', q:'19世紀中葉，美國爆發了南北戰爭(內戰)。這場戰爭最核心的爭議焦點是什麼？', o:['是否要脫離英國獨立','黑奴制度的存廢與聯邦分裂問題','是否要參與第一次世界大戰','西部領土的歸屬'], a:1, ex:'北方主張廢奴與保護關稅，南方主張蓄奴與自由貿易，林肯當選總統後南方宣布獨立引發內戰。'},
+            {id:71, s:'history', c:'world', q:'19世紀，一位科學家發表了《物種起源》，提出「物競天擇，適者生存」的演化論，徹底顛覆了傳統的宗教創世觀。這位科學家是？', o:['牛頓','愛因斯坦','達爾文','伽利略'], a:2, ex:'達爾文的演化論是19世紀最重要的科學突破之一，後來甚至被誤用為「社會達爾文主義」合理化帝國主義。'},
+            {id:72, s:'history', c:'world', q:'第一次世界大戰中，德國為了避開法國邊境的堅固防線，選擇借道哪一個中立國進攻法國，結果導致英國以保護中立國為由對德宣戰？', o:['瑞士','比利時','西班牙','義大利'], a:1, ex:'德國的「施里芬計畫」破壞了比利時的中立，成為英國參戰的直接原因。'},
+            {id:73, s:'history', c:'world', q:'二戰前夕，英法兩國在「慕尼黑會議」上，同意將捷克的蘇台德區割讓給德國，企圖以此滿足希特勒的野心來避免戰爭。這種妥協退讓的外交策略稱為？', o:['結盟政策','姑息政策(綏靖政策)','門戶開放政策','圍堵政策'], a:1, ex:'姑息政策不僅未能阻止戰爭，反而讓希特勒得寸進尺，最終發動二戰。'},
+            {id:74, s:'history', c:'world', q:'1962年，冷戰期間發生了最嚴重的一次核戰危機。蘇聯企圖在美國的「後院」部署核子飛彈，遭美國海軍封鎖。此事件為？', o:['柏林危機','古巴飛彈危機','韓戰','越戰'], a:1, ex:'古巴飛彈危機是人類歷史上最接近全面核子戰爭的時刻，最終蘇聯妥協撤除飛彈。'},
+            {id:75, s:'history', c:'world', q:'冷戰結束後，世界局勢並未完全和平。2001年，美國本土遭到恐怖組織基地(Al-Qaeda)發動劫機攻擊，摧毀了紐約世貿雙子星大樓。此事件稱為？', o:['珍珠港事變','波斯灣戰爭','九一一事件','阿拉伯之春'], a:2, ex:'911事件改變了21世紀的全球戰略，美國隨後發動了反恐戰爭(阿富汗、伊拉克戰爭)。'},
+
+            // 地理與氣候 (25題)
+            {id:76, s:'geo', c:'geo', q:'某地氣候圖顯示：「最冷月均溫在0℃以上，降雨集中在冬季，夏季炎熱乾燥」。這種氣候最適合種植葡萄、橄欖。請問這是哪種氣候類型？', o:['熱帶雨林氣候','溫帶海洋性氣候','溫帶地中海型氣候','溫帶季風氣候'], a:2, ex:'地中海型氣候的特徵是「夏乾冬雨」，因夏季受副熱帶高壓籠罩，冬季受西風帶影響。'},
+            {id:77, s:'geo', c:'geo', q:'台灣的地形以山地為主，平原狹小。造成台灣島上高山林立、地震頻繁的最主要地質原因是？', o:['位於太平洋板塊與歐亞板塊的張裂性交界','位於菲律賓海板塊與歐亞板塊的聚合性交界','位於熱帶氣旋頻繁的路徑上','冰河時期的冰川侵蝕作用'], a:1, ex:'台灣位於環太平洋火山地震帶，是板塊擠壓(聚合)隆起形成的島嶼。'},
+            {id:78, s:'geo', c:'geo', q:'「這條海峽連接了印度洋與太平洋，是中東石油運往東亞的必經之路，新加坡因此成為繁榮的轉口港。」這條海峽是？', o:['直布羅陀海峽','麥哲倫海峽','麻六甲海峽','英吉利海峽'], a:2, ex:'麻六甲海峽位於馬來半島與蘇門答臘島之間，是亞洲的海上生命線。'},
+            {id:79, s:'geo', c:'geo', q:'非洲的撒哈拉沙漠是世界最大的熱帶沙漠。造成該地終年高溫少雨的最主要氣候因素是？', o:['深居內陸水氣難以到達','終年受副熱帶高氣壓籠罩，氣流下沉','沿岸有暖流經過增溫','地勢過高阻擋水氣'], a:1, ex:'副熱帶高壓(約緯度20-30度)氣流下沉，不易成雲致雨，是形成熱帶沙漠的主因。'},
+            {id:80, s:'geo', c:'geo', q:'南美洲的亞馬遜盆地擁有世界最大的熱帶雨林。這裡的降雨類型主要是每天午後因地表受熱空氣強烈上升而形成的哪一種雨？', o:['地形雨','鋒面雨','對流雨','颱風雨'], a:2, ex:'赤道地區終年高溫，蒸發旺盛，午後常下短暫而強烈的對流雨(西北雨)。'},
+            {id:81, s:'geo', c:'geo', q:'西歐地區(如英國、法國西部)雖然緯度偏高，但冬季卻比同緯度的亞洲東岸溫暖濕潤。這主要是受到哪兩項地理因素的影響？', o:['信風與涼流','西風與北大西洋暖流','季風與黑潮','極地東風與地形阻擋'], a:1, ex:'溫帶海洋性氣候受來自海洋的西風吹拂，加上北大西洋暖流調節，全年溫和有雨。'},
+            {id:82, s:'geo', c:'geo', q:'台灣夏季常吹西南季風，冬季常吹東北季風。造成這種風向隨季節大規模改變的根本原因是？', o:['地球自轉產生的科氏力','海陸性質差異(比熱不同)造成的氣壓變化','洋流方向的改變','聖嬰現象'], a:1, ex:'夏季陸地吸熱快形成低壓，風由海洋吹向陸地；冬季陸地散熱快形成高壓，風由陸地吹向海洋。'},
+            {id:83, s:'geo', c:'geo', q:'「這條運河切斷了中美地峽，大幅縮短了大西洋與太平洋之間的航程，採用船閘式設計來克服水位落差。」這是指？', o:['蘇伊士運河','巴拿馬運河','基爾運河','京杭大運河'], a:1, ex:'巴拿馬運河位於中美洲，對美國的兩洋海運與全球貿易至關重要。'},
+            {id:84, s:'geo', c:'geo', q:'等高線地形圖上，等高線呈現「V」字型，且V字的尖端指向「海拔較高」的方向。這代表什麼地形？', o:['山脊','山谷(河谷)','盆地','懸崖'], a:1, ex:'V字尖端指高處為山谷(常有河流)；尖端指低處為山脊(分水嶺)。'},
+            {id:85, s:'geo', c:'geo', q:'台灣的工業發展歷程中，目前產值最高、被稱為「護國神山」的半導體產業(如台積電)，主要集中在下列哪一種工業區位？', o:['原料區位','勞力區位','動力區位','技術與交通區位(科學園區)'], a:3, ex:'高科技產業依賴高級研發人才與便捷的交通(如鄰近高鐵、機場)，多設於科學園區。'},
+            {id:86, s:'geo', c:'geo', q:'日本是一個多火山、地震的島國，資源匱乏，但經濟卻高度發達。日本的工業區主要分布在何處？為什麼？', o:['內陸山區；為了國防安全','太平洋沿岸；便於進口原料與出口產品','北海道；因為當地礦產豐富','日本海沿岸；為了與亞洲大陸貿易'], a:1, ex:'日本屬「加工出口型」經濟，為降低運輸成本，重工業多集中在太平洋沿岸的港口。'},
+            {id:87, s:'geo', c:'geo', q:'東南亞的印尼、馬來西亞等地，廣泛種植橡膠、油棕、咖啡等經濟作物，產品大量外銷。這種農業型態稱為？', o:['綠洲農業','熱帶栽培業','地中海型農業','混合農業'], a:1, ex:'熱帶栽培業起源於殖民時期，特徵是投入大量勞力與資本，種植單一經濟作物供出口。'},
+            {id:88, s:'geo', c:'geo', q:'中國的地勢特徵為「西高東低，呈三級階梯狀分布」。這種地勢對中國自然環境的最大好處是？', o:['阻擋了冬季的蒙古高壓','有利於海洋濕潤氣流深入內陸，帶來降雨','使所有河流都向西流','減少了地震的發生'], a:1, ex:'西高東低的地勢讓太平洋的夏季季風容易深入內陸，且使大河多向東流，便利東西交通。'},
+            {id:89, s:'geo', c:'geo', q:'位於南美洲西岸的智利北部(亞他加馬沙漠)，被稱為世界旱極。除了副熱帶高壓外，哪一股洋流的流經加劇了當地的乾燥程度？', o:['秘魯涼流','巴西暖流','墨西哥灣暖流','阿拉斯加暖流'], a:0, ex:'涼流流經會使空氣下層冷卻，大氣穩定不易對流成雲，加劇沿岸的乾燥氣候。'},
+            {id:90, s:'geo', c:'geo', q:'近年來全球氣候變遷嚴重，北極冰層融化。這對全球環境最直接的威脅是？', o:['引發強烈地震','海平面上升，淹沒沿海低窪地區與島國','臭氧層破洞擴大','酸雨增加'], a:1, ex:'冰川融化與海水受熱膨脹會導致海平面上升，威脅如吐瓦魯等島國及沿海平原。'},
+            {id:91, s:'geo', c:'geo', q:'中東(西亞)地區雖然氣候乾燥、農業不發達，但在20世紀後卻成為全球地緣政治的焦點。主要原因是該地區擁有豐富的何種資源？', o:['黃金與鑽石','石油與天然氣','煤炭與鐵礦','豐富的森林資源'], a:1, ex:'波斯灣沿岸是全球石油儲量最豐富的地區，對全球能源供應具決定性影響。'},
+            {id:92, s:'geo', c:'geo', q:'人口金字塔圖中，若底部(幼年人口)極寬，頂部(老年人口)極尖，呈現標準的金字塔形狀。這通常代表該國處於何種發展階段？', o:['已開發國家，面臨高齡化','開發中國家，出生率高、死亡率逐漸下降','人口負成長國家','經歷嚴重戰爭導致人口銳減'], a:1, ex:'寬底尖頂代表高出生率與低壽命，是傳統農業社會或開發中國家常見的人口結構。'},
+            {id:93, s:'geo', c:'geo', q:'台灣的降雨空間分布極不平均。一般而言，台灣年降雨量最少的地區位於何處？', o:['東北部的基隆','中部的阿里山','西南部的沿海平原(如嘉南平原)','東部的花蓮'], a:2, ex:'西南沿海平原在冬季處於東北季風的背風側，夏季雖有西南季風但缺乏地形抬升，故年雨量相對較少。'},
+            {id:94, s:'geo', c:'geo', q:'紐西蘭的畜牧業極為發達，主要出口乳製品與羊肉。紐西蘭發展畜牧業的優良氣候條件為何？', o:['熱帶莽原氣候','溫帶海洋性氣候，全年溫和濕潤適合牧草生長','溫帶大陸性氣候','溫帶地中海型氣候'], a:1, ex:'紐西蘭受西風帶影響，屬溫帶海洋性氣候，牧草生長茂盛，適合放牧。'},
+            {id:95, s:'geo', c:'geo', q:'中國的「黃河」常被稱為「中國的憂患」，歷史上多次決堤改道。黃河下游容易發生水患的主要原因是？', o:['下游流經熱帶雨林區降雨過多','中游流經黃土高原，挾帶大量泥沙在下游淤積形成「懸河」','下游建了太多水庫','受颱風侵襲頻率最高'], a:1, ex:'黃土高原水土流失嚴重，泥沙在下游平原沉積，使河床高於兩岸地面形成懸河，極易潰堤。'},
+            {id:96, s:'geo', c:'geo', q:'歐洲聯盟(EU)是目前世界上整合程度最高的區域經濟組織。下列何者「不是」歐盟整合的特徵？', o:['發行單一貨幣(歐元)','人員、商品、資金可在會員國間自由流動','擁有共同的歐洲議會','所有歐洲國家都必須加入'], a:3, ex:'加入歐盟是自願的，且需符合嚴格的經濟與民主條件。如英國已脫歐，瑞士從未加入。'},
+            {id:97, s:'geo', c:'geo', q:'「這片廣大的草原位於撒哈拉沙漠以南，乾濕季分明，是獅子、斑馬、長頸鹿等野生動物的天堂。」這是描述哪一種氣候區的景觀？', o:['熱帶雨林氣候','熱帶莽原氣候','溫帶草原氣候','苔原氣候'], a:1, ex:'熱帶莽原氣候(夏雨冬乾)的植被以高草和稀疏樹木為主，是非洲野生動物大遷徙的舞台。'},
+            {id:98, s:'geo', c:'geo', q:'台灣的河流多具有「短小流急、荒溪型(豐枯水期流量差異大)」的特徵。這主要受哪兩項因素影響？', o:['地形陡峭與降雨季節分布不均','緯度低與蒸發旺盛','植被破壞與工業污染','板塊擠壓與溫室效應'], a:0, ex:'中央山脈偏東，河流源短流急；加上降雨集中在夏秋(颱風、梅雨)，冬春枯水，形成荒溪型河川。'},
+            {id:99, s:'geo', c:'geo', q:'南亞的印度半島被稱為「次大陸」，其北部有一道天然屏障阻擋了來自亞洲內陸的寒冷氣流。這道屏障是？', o:['阿爾卑斯山脈','烏拉山脈','喜馬拉雅山脈','安地斯山脈'], a:2, ex:'喜馬拉雅山脈是印澳板塊與歐亞板塊擠壓形成，阻擋了北方的冷空氣，使印度冬季較同緯度溫暖。'},
+            {id:100, s:'geo', c:'geo', q:'GPS(全球定位系統)在現代生活中應用廣泛。GPS主要透過接收什麼訊號來計算出使用者的精確經緯度位置？', o:['海底電纜訊號','人造衛星發射的電波訊號','行動電話基地台訊號','廣播電台訊號'], a:1, ex:'GPS依靠接收太空中多顆導航衛星的訊號，利用三角測量原理計算出精確位置。'}
+        ];
+
+        // ==========================================
+        // 4. UI 與地圖渲染邏輯
+        // ==========================================
+        const categories = [
+            { id: 'taiwan', name: '台灣史', icon: 'fa-leaf' }, { id: 'china', name: '中國史', icon: 'fa-dragon' },
+            { id: 'world', name: '世界史', icon: 'fa-globe' }, { id: 'geo', name: '地理時事', icon: 'fa-cloud-sun' }
+        ];
+
+        const timelines = {
+            'taiwan': [{ id: 'all', name: '全部' }, { id: 'tw_1', name: '史前與荷鄭' }, { id: 'tw_2', name: '清領時期' }, { id: 'tw_3', name: '日治時期' }, { id: 'tw_4', name: '戰後台灣' }],
+            'china': [{ id: 'all', name: '全部' }, { id: 'cn_1', name: '上古與中古' }, { id: 'cn_2', name: '近世(宋明清)' }, { id: 'cn_3', name: '晚清與民國' }, { id: 'cn_4', name: '當代中國' }],
+            'world': [{ id: 'all', name: '全部' }, { id: 'w_1', name: '上古與中古' }, { id: 'w_2', name: '近代大航海' }, { id: 'w_3', name: '兩次大戰與現代' }]
+        };
+
+        let currentCategory = 'taiwan';
+        let currentPeriod = 'all';
+
+        const filterContainer = document.getElementById('era-filters');
+        categories.forEach(cat => {
+            const btn = document.createElement('button');
+            btn.className = `shrink-0 px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors filter-btn snap-center`;
+            btn.innerHTML = `<i class="fa-solid ${cat.icon} mr-1"></i> ${cat.name}`;
+            btn.dataset.target = cat.id;
+            btn.onclick = () => { currentCategory = cat.id; currentPeriod = 'all'; updateCategoryUI(); renderTimeline(); renderMapData(); };
+            filterContainer.appendChild(btn);
+        });
+
+        function updateCategoryUI() {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                if (btn.dataset.target === currentCategory) {
+                    btn.classList.add('bg-blue-600', 'text-white'); btn.classList.remove('bg-white', 'text-gray-600');
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                } else {
+                    btn.classList.add('bg-white', 'text-gray-600'); btn.classList.remove('bg-blue-600', 'text-white');
+                }
+            });
+        }
+
+        function renderTimeline() {
+            const tlContainer = document.getElementById('timeline-container');
+            tlContainer.innerHTML = '';
+            if (currentCategory === 'geo' || !timelines[currentCategory]) { tlContainer.classList.add('hidden'); return; }
+            tlContainer.classList.remove('hidden');
+            
+            timelines[currentCategory].forEach(period => {
+                const btn = document.createElement('button');
+                const isActive = (period.id === currentPeriod);
+                btn.className = `shrink-0 px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap snap-center border ${isActive ? 'bg-gray-800 text-white border-gray-800 shadow-md transform scale-105' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-100'}`;
+                btn.innerText = period.name;
+                btn.onclick = () => { currentPeriod = period.id; renderTimeline(); renderMapData(); };
+                tlContainer.appendChild(btn);
+            });
+        }
+
+        function renderMapData() {
+            closeSidebar();
+            currentMarkers.forEach(m => map.removeLayer(m)); currentMarkers = [];
+            currentPolygons.forEach(p => map.removeLayer(p)); currentPolygons = [];
+            clearWarAnimations();
+
+            if (currentCategory === 'geo') {
+                climateZones.forEach(zone => {
+                    const drawRect = (bounds) => {
+                        const rect = L.rectangle(bounds, { color: zone.color, weight: 2, fillOpacity: 0.25 }).addTo(map);
+                        rect.on('click', (e) => {
+                            panMapSmartly(e.latlng.lat, e.latlng.lng);
+                            openSidebar({ type: '氣候區', title: zone.name, time: '全球分佈', location: '點擊色塊', exam: zone.exam, process: '在地圖上以顏色區分不同氣候類型。', background: '受行星風系、洋流、地形影響。' });
+                        });
+                        currentPolygons.push(rect);
+                    };
+                    if (zone.bounds) drawRect(zone.bounds);
+                    if (zone.bounds2) drawRect(zone.bounds2);
+                });
+                map.flyTo([20, 0], window.innerWidth < 768 ? 1 : 2, { duration: 1.5 });
+            }
+
+            let filteredData = eventsData.filter(e => e.era === currentCategory);
+            if (currentPeriod !== 'all') filteredData = filteredData.filter(e => e.period === currentPeriod);
+
+            const bounds = [];
+            filteredData.forEach(event => {
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div class="marker-pin ${event.color}"></div><i class="fa-solid ${event.icon} marker-icon absolute" style="left:50%; top:50%; transform: translate(-50%, -50%);"></i>`,
+                    iconSize: [32, 32], iconAnchor: [16, 32]
+                });
+                const marker = L.marker([event.lat, event.lng], { icon: customIcon }).addTo(map);
+                marker.on('click', () => {
+                    panMapSmartly(event.lat, event.lng);
+                    openSidebar(event);
+                    if(event.triggerAnim) playWarAnimation(event.triggerAnim);
+                });
+                currentMarkers.push(marker);
+                bounds.push([event.lat, event.lng]);
+            });
+
+            if (bounds.length > 0 && currentCategory !== 'geo') {
+                map.flyToBounds(bounds, { paddingTopLeft: [50, 80], paddingBottomRight: [50, window.innerWidth < 768 ? 200 : 50], maxZoom: window.innerWidth < 768 ? 5 : 6, duration: 1.2 });
+            }
+        }
+
+        // 智慧平移與復位邏輯
+        function panMapSmartly(lat, lng) {
+            previousMapState = { center: map.getCenter(), zoom: map.getZoom() }; // 記住當前狀態
+            let targetZoom = map.getZoom() < 5 ? 5 : map.getZoom();
+            if (window.innerWidth < 768) {
+                let bounds = map.getBounds(); let latDiff = bounds.getNorth() - bounds.getSouth();
+                map.flyTo([lat - (latDiff * 0.25), lng], targetZoom, { duration: 0.5 });
+            } else {
+                let bounds = map.getBounds(); let lngDiff = bounds.getEast() - bounds.getWest();
+                map.flyTo([lat, lng + (lngDiff * 0.15)], targetZoom, { duration: 0.5 });
+            }
+        }
+
+        // 戰場動畫邏輯
+        function playWarAnimation(type) {
+            clearWarAnimations();
+            if(type === 'ww1') {
+                // 施里芬計畫 (德攻法)
+                const line1 = L.polyline([[52.5, 13.4], [50.8, 4.3], [48.8, 2.3]], { color: 'red', weight: 4, className: 'war-line' }).addTo(map);
+                // 德攻俄
+                const line2 = L.polyline([[52.5, 13.4], [55.7, 37.6]], { color: 'red', weight: 4, className: 'war-line' }).addTo(map);
+                warAnimationLayers.push(line1, line2);
+            } else if (type === 'ww2') {
+                // 諾曼第登陸 (英攻法)
+                const line1 = L.polyline([[50.8, -1.0], [49.3, -0.8]], { color: 'blue', weight: 5, className: 'war-line' }).addTo(map);
+                // 珍珠港 (日攻美)
+                const line2 = L.polyline([[35.6, 139.6], [21.3, -157.9]], { color: 'red', weight: 4, className: 'war-line-japan' }).addTo(map);
+                warAnimationLayers.push(line1, line2);
+            }
+        }
+        function clearWarAnimations() {
+            warAnimationLayers.forEach(l => map.removeLayer(l));
+            warAnimationLayers = [];
+        }
+
+        // 面板控制
+        const sidebar = document.getElementById('sidebar');
+        function openSidebar(data) {
+            document.getElementById('sb-type').innerText = data.type; document.getElementById('sb-title').innerText = data.title;
+            document.getElementById('sb-time').innerHTML = `<i class="fa-regular fa-clock mr-1"></i>${data.time}`;
+            document.getElementById('sb-location').innerHTML = `<i class="fa-solid fa-location-dot mr-1"></i>${data.location}`;
+            toggleSection('relations', data.relations); toggleSection('background', data.background);
+            toggleSection('process', data.process); toggleSection('impact', data.impact); toggleSection('exam', data.exam);
+            sidebar.classList.remove('sidebar-hidden');
+            document.getElementById('timeline-container').style.opacity = '0.2';
+        }
+        function toggleSection(id, content) {
+            const sec = document.getElementById(`section-${id}`); const txt = document.getElementById(`sb-${id}`);
+            if (content) { txt.innerText = content; sec.classList.remove('hidden'); } else { sec.classList.add('hidden'); }
+        }
+        function closeSidebar() {
+            sidebar.classList.add('sidebar-hidden');
+            document.getElementById('timeline-container').style.opacity = '1';
+            clearWarAnimations();
+            // 手機版自動復位
+            if (previousMapState && window.innerWidth < 768) {
+                map.flyTo(previousMapState.center, previousMapState.zoom, { duration: 0.6 });
+                previousMapState = null;
+            }
+        }
+
+        // ==========================================
+        // 5. 100題 素養題庫與診斷系統邏輯
+        // ==========================================
+        let currentQuizQueue = [];
+        let currentQIndex = 0;
+        let userAnswers = [];
+        let score = 0;
+
+        function openQuizModal() {
+            const modal = document.getElementById('quiz-modal');
+            modal.classList.remove('hidden');
+            setTimeout(() => { modal.classList.remove('opacity-0', 'scale-95'); }, 10);
+            resetQuizUI();
+        }
+        function closeQuizModal() {
+            const modal = document.getElementById('quiz-modal');
+            modal.classList.add('opacity-0', 'scale-95');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        }
+        function toggleQuizCats() {
+            const isHist = document.querySelector('input[name="q-subj"]:checked').value === 'history';
+            document.getElementById('quiz-cat-history').style.display = isHist ? 'block' : 'none';
+        }
+        function resetQuizUI() {
+            document.getElementById('quiz-setup').classList.remove('hidden');
+            document.getElementById('quiz-playing').classList.add('hidden');
+            document.getElementById('quiz-result').classList.add('hidden');
+            document.getElementById('quiz-mistakes').classList.add('hidden');
+        }
+
+        function startQuiz() {
+            const subj = document.querySelector('input[name="q-subj"]:checked').value;
+            let targetCats = [];
+            if (subj === 'history') {
+                document.querySelectorAll('.q-cat-cb:checked').forEach(cb => targetCats.push(cb.value));
+                if (targetCats.length === 0) return alert("請至少選擇一個歷史範圍！");
+            } else {
+                targetCats = ['geo'];
+            }
+            const count = parseInt(document.getElementById('q-count').value);
+            
+            // 過濾題庫
+            let pool = quizData.filter(q => q.s === subj && targetCats.includes(q.c));
+            // 隨機打亂並截取數量
+            pool = pool.sort(() => 0.5 - Math.random()).slice(0, count);
+            
+            if(pool.length === 0) return alert("該範圍目前沒有題目！");
+
+            currentQuizQueue = pool;
+            currentQIndex = 0;
+            userAnswers = [];
+            score = 0;
+
+            document.getElementById('quiz-setup').classList.add('hidden');
+            document.getElementById('quiz-playing').classList.remove('hidden');
+            renderQuestion();
+        }
+
+        function renderQuestion() {
+            const q = currentQuizQueue[currentQIndex];
+            document.getElementById('q-progress').innerText = `進度: ${currentQIndex + 1} / ${currentQuizQueue.length}`;
+            
+            let catName = q.c === 'taiwan' ? '台灣史' : q.c === 'china' ? '中國史' : q.c === 'world' ? '世界史' : '地理科';
+            document.getElementById('q-tag').innerText = catName;
+            document.getElementById('q-text').innerText = q.q;
+            
+            const optsContainer = document.getElementById('q-options');
+            optsContainer.innerHTML = '';
+            document.getElementById('btn-next-q').classList.add('hidden');
+
+            q.o.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full text-left p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition font-medium text-gray-700';
+                btn.innerHTML = `<span class="inline-block w-6 font-bold text-blue-600">${String.fromCharCode(65+index)}.</span> ${opt}`;
+                btn.onclick = () => selectOption(index, btn);
+                optsContainer.appendChild(btn);
+            });
+        }
+
+        function selectOption(selectedIndex, btnElement) {
+            // 鎖定所有按鈕
+            const buttons = document.getElementById('q-options').querySelectorAll('button');
+            buttons.forEach(b => { b.onclick = null; b.classList.remove('hover:border-blue-500', 'hover:bg-blue-50', 'cursor-pointer'); });
+            
+            const q = currentQuizQueue[currentQIndex];
+            const isCorrect = (selectedIndex === q.a);
+            userAnswers.push({ q: q, userAns: selectedIndex, isCorrect: isCorrect });
+            
+            if (isCorrect) {
+                btnElement.classList.add('bg-green-100', 'border-green-500', 'text-green-800');
+                btnElement.innerHTML += ' <i class="fa-solid fa-circle-check float-right mt-1 text-green-600"></i>';
+                score += (100 / currentQuizQueue.length);
+            } else {
+                btnElement.classList.add('bg-red-100', 'border-red-500', 'text-red-800');
+                btnElement.innerHTML += ' <i class="fa-solid fa-circle-xmark float-right mt-1 text-red-600"></i>';
+                // 標示正確答案
+                buttons[q.a].classList.add('bg-green-50', 'border-green-500');
+                
+                // 存入錯題本 (LocalStorage)
+                saveMistake(q);
+            }
+
+            // 顯示詳解
+            const expDiv = document.createElement('div');
+            expDiv.className = 'mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 font-medium animate-pulse';
+            expDiv.innerHTML = `<i class="fa-solid fa-lightbulb mr-1"></i> <b>解析：</b>${q.ex}`;
+            document.getElementById('q-options').appendChild(expDiv);
+
+            document.getElementById('btn-next-q').classList.remove('hidden');
+            if (currentQIndex === currentQuizQueue.length - 1) {
+                document.getElementById('btn-next-q').innerHTML = '查看診斷報告 <i class="fa-solid fa-chart-pie"></i>';
+            }
+        }
+
+        function nextQuestion() {
+            currentQIndex++;
+            if (currentQIndex < currentQuizQueue.length) {
+                renderQuestion();
+            } else {
+                showResults();
+            }
+        }
+
+        function showResults() {
+            document.getElementById('quiz-playing').classList.add('hidden');
+            document.getElementById('quiz-result').classList.remove('hidden');
+            
+            const finalScore = Math.round(score);
+            document.getElementById('r-score').innerText = finalScore;
+            
+            // 產生診斷
+            let diagnosis = "";
+            let wrongCats = { 'taiwan':0, 'china':0, 'world':0, 'geo':0 };
+            userAnswers.filter(a => !a.isCorrect).forEach(a => wrongCats[a.q.c]++);
+            
+            if (finalScore === 100) {
+                diagnosis = "太神啦！你的社會科實力已經達到 A++ 的水準，請繼續保持！";
+            } else if (finalScore >= 80) {
+                diagnosis = "表現非常優秀！具備 A 的實力。";
+            } else {
+                diagnosis = "還有進步空間喔！建議多利用沙盤地圖複習。";
+            }
+            
+            let maxWrongCat = Object.keys(wrongCats).reduce((a, b) => wrongCats[a] > wrongCats[b] ? a : b);
+            if (wrongCats[maxWrongCat] > 0) {
+                let catName = maxWrongCat === 'taiwan' ? '台灣史' : maxWrongCat === 'china' ? '中國史' : maxWrongCat === 'world' ? '世界史' : '地理科';
+                diagnosis += `<br><br><span class="text-red-600 font-bold">系統偵測弱點：</span>你在【${catName}】錯了比較多題，建議針對該單元加強複習。`;
+            }
+            document.getElementById('r-diagnosis').innerHTML = diagnosis;
+
+            // 顯示本次錯題
+            const mList = document.getElementById('r-mistakes-list');
+            mList.innerHTML = '';
+            const mistakes = userAnswers.filter(a => !a.isCorrect);
+            if (mistakes.length === 0) {
+                mList.innerHTML = '<p class="text-gray-500">本次測驗無錯題，完美！</p>';
+            } else {
+                mistakes.forEach(m => {
+                    mList.innerHTML += `
+                        <div class="bg-white p-4 rounded-lg border shadow-sm">
+                            <p class="font-bold text-gray-800 mb-2">${m.q.q}</p>
+                            <p class="text-sm text-red-600 mb-1"><i class="fa-solid fa-xmark"></i> 你的作答：${m.q.o[m.userAns]}</p>
+                            <p class="text-sm text-green-600 mb-2"><i class="fa-solid fa-check"></i> 正確答案：${m.q.o[m.q.a]}</p>
+                            <p class="text-xs text-gray-600 bg-gray-100 p-2 rounded">解析：${m.q.ex}</p>
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        // 錯題本功能 (LocalStorage)
+        function saveMistake(q) {
+            let mistakes = JSON.parse(localStorage.getItem('socialQuizMistakes') || '[]');
+            if (!mistakes.find(m => m.id === q.id)) {
+                mistakes.push(q);
+                localStorage.setItem('socialQuizMistakes', JSON.stringify(mistakes));
+            }
+        }
+
+        function showMistakes() {
+            document.getElementById('quiz-setup').classList.add('hidden');
+            document.getElementById('quiz-mistakes').classList.remove('hidden');
+            
+            const mList = document.getElementById('m-list');
+            let mistakes = JSON.parse(localStorage.getItem('socialQuizMistakes') || '[]');
+            
+            if (mistakes.length === 0) {
+                mList.innerHTML = '<div class="text-center py-10 text-gray-500"><i class="fa-solid fa-face-smile text-4xl mb-3"></i><p>錯題本空空如也，繼續保持！</p></div>';
+                return;
+            }
+            
+            mList.innerHTML = '';
+            mistakes.forEach(q => {
+                mList.innerHTML += `
+                    <div class="bg-white p-4 rounded-lg border shadow-sm relative">
+                        <span class="absolute top-2 right-2 text-xs bg-red-100 text-red-800 px-2 py-1 rounded">錯題</span>
+                        <p class="font-bold text-gray-800 mb-3 pr-10">${q.q}</p>
+                        <p class="text-sm text-green-700 font-bold mb-2"><i class="fa-solid fa-check"></i> 答案：${q.o[q.a]}</p>
+                        <p class="text-xs text-gray-600 bg-gray-50 border p-2 rounded">解析：${q.ex}</p>
+                    </div>
+                `;
+            });
+        }
+
+        function clearMistakes() {
+            if(confirm("確定要清空所有錯題紀錄嗎？")) {
+                localStorage.removeItem('socialQuizMistakes');
+                showMistakes();
+            }
+        }
+
+        // 啟動系統
+        setTimeout(() => { updateCategoryUI(); renderTimeline(); renderMapData(); }, 300);
+
+    </script>
+</body>
+</html>
